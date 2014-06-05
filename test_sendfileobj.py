@@ -7,16 +7,17 @@ from sendfileobj import FileDescriptorType
 def test_FileDescriptorType():
     buf = FileDescriptorType.create_buffer()
     assert len(buf) == FileDescriptorType.SIZE
-    assert buf.raw == '\x00' * FileDescriptorType.SIZE
+    assert bytearray(buf) == '\x00' * FileDescriptorType.BYTESIZE
 
     fdt = FileDescriptorType(FileDescriptorType.IS_FILE, 'r')
 
     repr(fdt)
 
-    buf = FileDescriptorType.create_buffer()
-    buf.value = FileDescriptorType.IS_FILE + 'r'
+    data = bytearray([FileDescriptorType.IS_FILE]) + bytearray('r')
+    buf = FileDescriptorType.create_buffer(data)
 
-    assert fdt.packed.raw == buf.raw
+    # list for ease of reading pytest asserts
+    assert list(fdt.packed) == list(buf)
 
     assert FileDescriptorType.frompacked(buf) == fdt
 
@@ -34,12 +35,12 @@ def test_FileDescriptorType():
     sock_fdt = FileDescriptorType.fromfileobj(sock)
 
     assert sock_fdt.type == FileDescriptorType.IS_SOCKET
-    assert sock_fdt.data == '120'
+    assert sock_fdt.data == (1, 2, 0)
 
-    buf = FileDescriptorType.create_buffer()
-    buf.value = FileDescriptorType.IS_SOCKET + '120'
+    data = bytearray([FileDescriptorType.IS_SOCKET]) + bytearray((1, 2, 0))
+    buf = FileDescriptorType.create_buffer(data)
 
-    assert sock_fdt.packed.raw == buf.raw
+    assert list(sock_fdt.packed) == list(buf)
 
     reconstructed_sock = sock_fdt.fileobj(sock.fileno())
     assert reconstructed_sock.family == sock.family

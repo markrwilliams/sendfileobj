@@ -78,13 +78,12 @@ _recvmsg.restype = ctypes.c_int
 
 
 class FileDescriptorType(namedtuple('FileDescriptorType', 'type data')):
+    SIZE = 10
+    _ARRAY = ctypes.c_int * SIZE
+    BYTESIZE = SIZE * ctypes.sizeof(ctypes.c_int)
 
-    IS_FILE = '\x01'
-    IS_SOCKET = '\x02'
-
-    # <= glib 2.14 only parses up to 6 mode chars; > parses 7
-    # so 1 byte for type + 7 bytes for mode + 1 byte for \00
-    SIZE = 1 + 7 + 1
+    IS_FILE = 1
+    IS_SOCKET = 2
 
     def __new__(cls, type, data):
         if type not in (cls.IS_FILE, cls.IS_SOCKET):
@@ -93,31 +92,42 @@ class FileDescriptorType(namedtuple('FileDescriptorType', 'type data')):
 
     @property
     def packed(self):
-        to_pack = self.type + self.data
-        buf = self.create_buffer()
-        assert len(to_pack) < len(buf)
-        buf.value = to_pack
-        return buf
+        if self.type == self.IS_FILE:
+            semi_packed = bytearray(chr(self.type) + self.data)
+        elif self.type == self.IS_SOCKET:
+            semi_packed = bytearray((self[0],) + self[1])
+        else:
+            raise ValueError('Unknown type {0}'.format(self.type))
+        return self.create_buffer(semi_packed.ljust(self.SIZE, '\0'))
 
     def fileobj(self, fd):
         if self.type == self.IS_FILE:
+            print repr(fd), repr(self.data)
             return os.fdopen(fd, self.data)
         elif self.type == self.IS_SOCKET:
-            family, type, proto = self.data
-            return socket.fromfd(fd, int(family), int(type), int(proto))
+            return socket.fromfd(fd, *self.data)
         else:
             raise ValueError('Unknown type {0}'.format(self.type))
 
     @classmethod
-    def create_buffer(cls):
+    def create_buffer(cls, data=()):
         # create_string_buffer adds a null byte for you
-        return ctypes.create_string_buffer('\x00' * (cls.SIZE - 1))
+        return cls._ARRAY(*data)
 
     @classmethod
     def frompacked(cls, packed):
-        assert len(packed) <= cls.SIZE
-        value = packed.value
-        return cls(value[0], value[1:])
+        assert len(packed) <= cls.BYTESIZE
+        _type, data = packed[0], packed[1:]
+        if _type == cls.IS_FILE:
+            data = data[:7]
+            if 0 in data:
+                del data[data.index(0):]
+            data = str(bytearray(data))
+        elif _type == cls.IS_SOCKET:
+            data = data[:3]
+        else:
+            raise ValueError('Unknown type {0}'.format(_type))
+        return cls(_type, data)
 
     @classmethod
     def fromfileobj(cls, fileobj):
@@ -126,12 +136,9 @@ class FileDescriptorType(namedtuple('FileDescriptorType', 'type data')):
             data = fileobj.mode[:7]
         elif isinstance(fileobj, socket.socket):
             fd_type = cls.IS_SOCKET
-            data = '{0}{1}{2}'.format(fileobj.family,
-                                      fileobj.type,
-                                      fileobj.proto)
+            data = (fileobj.family, fileobj.type, fileobj.proto)
         else:
             raise ValueError("Can't send file object of {0}".format(fileobj))
-
         return cls(fd_type, data)
 
     def __repr__(self):
@@ -194,7 +201,7 @@ def recvfileobj(sock):
         errno = ctypes.get_errno()
         raise CMSGError(errno,
                         'Could not receive message: ' + os.strerror(errno))
-    elif res != FileDescriptorType.SIZE:
+    elif res != FileDescriptorType.BYTESIZE:
         raise CMSGError(-1, 'Received message too small')
 
     # equivalent to CMSG_DATA pointer

@@ -15,6 +15,6 @@ if __name__ == '__main__':
           description=__description__,
           author=__author__,
           author_email=__author_email__,
-          py_modules=['sendfileobj'],
+          py_modules=['socket_messages'],
           license=__license__,
           platforms='linux') # ??

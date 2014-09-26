@@ -128,7 +128,7 @@ def create_iovs(buffers, writable=False):
 
 def create_cmsghdr(cmsg_level, cmsg_type, raw_data, writable=False):
     creation_method = 'from_buffer' if writable else 'from_buffer_copy'
-    CMSGDataType = (cmsghdr.CMSG_DATA_TYPE * len(raw_data))
+    CMSGDataType = (cmsghdr.CMSG_DATA_TYPE * len(buffer(raw_data)))
     cmsg_data = getattr(CMSGDataType, creation_method)(raw_data)
 
     return cmsghdr.with_data(cmsg_len=CMSG_LEN(ctypes.sizeof(cmsg_data)),
@@ -138,6 +138,8 @@ def create_cmsghdr(cmsg_level, cmsg_type, raw_data, writable=False):
 
 
 def pack_cmsghdrs(cmsg_headers):
+    if not cmsg_headers:
+        return None, 0
     msg_control_bytes = ''.join(buffer(cmh)[:] for cmh in cmsg_headers)
     msg_control_buffer = (ctypes.c_char
                           * len(msg_control_bytes))(*msg_control_bytes)
@@ -153,47 +155,29 @@ c_ubyte_p = ctypes.POINTER(ctypes.c_ubyte)
 
 
 def unpack_cmsghdrs(msg_control, msg_controllen):
-    complete_header_length = msg_controllen.value
     complete_header = ctypes.cast(msg_control,
-                                  c_ubyte_p)[:complete_header_length]
+                                  c_ubyte_p)[:msg_controllen]
     header_length = CMSG_LEN(0).value
     buf = bytearray(complete_header)
     offset = 0
-    while offset < complete_header_length:
+
+    cmsg_headers = []
+    while offset < msg_controllen:
         cmsg_header = cmsghdr.from_buffer(buf, offset)
         cmsg_level = cmsg_header.cmsg_level
         cmsg_type = cmsg_header.cmsg_type
         cmsg_data = buf[offset + header_length:offset + cmsg_header.cmsg_len]
-        yield ControlMessageHeader(cmsg_level, cmsg_type, cmsg_data)
+        cmsg_headers.append(ControlMessageHeader(cmsg_level,
+                                                 cmsg_type,
+                                                 cmsg_data))
         offset += CMSG_SPACE(cmsg_header.cmsg_len - header_length).value
+    return cmsg_headers
 
 
-def sendmsg(sock, buffers, ancdata=(), flags=0):
-    iovs = []
-    for buf in buffers:
-        array = (ctypes.c_byte * len(buf)).from_buffer_copy(buffer(buf))
-        iovs.append(iovec(iov_base=ctypes.cast(array, ctypes.c_void_p),
-                          iov_len=ctypes.c_size_t(len(buf))))
-
-    cmhs = []
-    for datum in ancdata:
-        cmsg_level, cmsg_type, raw_data = datum
-        raw_data = buffer(raw_data)
-        cmsg_data = (cmsghdr.CMSG_DATA_TYPE
-                     * len(raw_data)).from_buffer_copy(raw_data)
-        cmh = cmsghdr.with_data(cmsg_len=CMSG_LEN(len(raw_data)),
-                                cmsg_level=cmsg_level,
-                                cmsg_type=cmsg_type,
-                                cmsg_data=cmsg_data)
-        cmhs.append(cmh)
-
-    # the flexarrays at the end of the struct break ctype's arrays, so
-    # we have to do this by hand
-    msg_control_bytes = ''.join(buffer(cmh)[:] for cmh in cmhs)
-    msg_control_buffer = (ctypes.c_char
-                          * len(msg_control_bytes))(*msg_control_bytes)
-    msg_control = ctypes.cast(msg_control_buffer, ctypes.c_void_p)
-    msg_controllen = ctypes.c_size_t(len(msg_control_buffer))
+def sendmsg(sock, buffers, ancdata=(), flags=0, address=None):
+    iovs = create_iovs(buffers)
+    cmsg_headers = [create_cmsghdr(*datum) for datum in ancdata]
+    msg_control, msg_controllen = pack_cmsghdrs(cmsg_headers)
     mh = msghdr(msg_name=None,
                 msg_namelen=0,
                 msg_iov=iovec_ptr((iovec * len(iovs))(*iovs)),
@@ -207,19 +191,27 @@ def sendmsg(sock, buffers, ancdata=(), flags=0):
     return result
 
 
-def recvmsg_into(sock, buffers, ancbufsize=None, flags=0):
-    pass
+ReceivedIntoMessage = namedtuple('ReceivedIntoMessage',
+                                 'nbytes ancdata flags address')
 
 
-def recvfileobj(sock):
-    mh = msghdr_for_fd(0, fd_buf=ctypes.create_string_buffer('\x00' * 5))
-    res = _recvmsg(ctypes.c_int(sock.fileno()), mh, 0)
-    if res == -1:
+def recvmsg_into(sock, buffers, ancbufsize=0, flags=0):
+    iovs = create_iovs(buffers, writable=True)
+    msg_control = None
+    if ancbufsize:
+        msg_control = ctypes.cast((ctypes.c_ubyte * ancbufsize)(),
+                                  ctypes.c_void_p)
+    mh = msghdr(msg_name=None,
+                msg_namelen=0,
+                msg_iov=iovec_ptr((iovec * len(iovs))(*iovs)),
+                msg_iovlen=len(iovs),
+                msg_control=msg_control,
+                msg_controllen=ancbufsize)
+    nbytes = _recvmsg(ctypes.c_int(sock.fileno()), mh, flags)
+    if nbytes == -1:
         errno = ctypes.get_errno()
         raise CMSGError(errno, 'Could not receive message')
-
-    # equivalent to CMSG_DATA pointer
-    import pdb; pdb.set_trace()
-    cmsg_data_ptr = ctypes.cast(mh.cmsg.cmsg_data,
-                                ctypes.POINTER(ctypes.c_int))
-    return cmsg_data_ptr.contents.value, mh.fd_buf.value
+    ancdata = []
+    if mh.msg_controllen > 0:
+        ancdata = unpack_cmsghdrs(mh.msg_control, mh.msg_controllen)
+    return ReceivedIntoMessage(nbytes, ancdata, mh.msg_flag, None)

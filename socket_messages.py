@@ -79,31 +79,6 @@ _recvmsg.argtypes = [ctypes.c_int,
 _recvmsg.restype = ctypes.c_int
 
 
-def msghdr_for_fd(fd, fd_buf):
-    iov = iovec(iov_base=ctypes.addressof(fd_buf),
-                iov_len=ctypes.c_size_t(ctypes.sizeof(fd_buf)))
-
-    cmsg_data = (ctypes.c_ubyte * ctypes.sizeof(ctypes.c_int))()
-    cmhp = cmsghdr.with_data(cmsg_len=CMSG_LEN(ctypes.sizeof(cmsg_data)),
-                             cmsg_level=0,
-                             cmsg_type=0,
-                             cmsg_data=cmsg_data)
-
-    mh = msghdr(msg_name=None,
-                msg_namelen=0,
-                msg_iov=iovec_ptr(iov),
-                msg_iovlen=1,
-                msg_control=ctypes.addressof(cmhp),
-                msg_controllen=ctypes.c_size_t(ctypes.sizeof(cmhp)))
-
-    # save references to these so they don't get deleted!
-    mh.cmsg = cmhp
-    mh.iovec = iov
-    mh.fd_buf = fd_buf
-    mh.cmsg_data = cmsg_data
-    return mh
-
-
 class CMSGError(socket.error):
 
     def __init__(self, errno, msg):

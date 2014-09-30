@@ -66,7 +66,13 @@ class SocketBasket(Basket):
             family, type, proto = desc['family'], desc['type'], desc['proto']
         except KeyError as e:
             raise SocketBasketException('Missing socket data %r' % e.args[0])
-        return socket.fromfd(fd, family, type, proto)
+
+        sock = socket.fromfd(fd, family, type, proto)
+        # https://docs.python.org/2/library/socket.html#socket.fromfd
+        # Duplicate the file descriptor fd, so close it
+        os.close(fd)
+
+        return sock
 
 
 class OverlappingBasketException(PassagewayException):

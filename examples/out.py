@@ -1,9 +1,16 @@
 import socket
 from passage.way import Passageway
 from passage.connections import connect
+import time
 
 
-sock = socket.create_connection(('www.google.com', 80))
-sock.sendall('GET / HTTP/1.0\r\n\r\n')
+outbound = connect('/tmp/socket')
 
-Passageway().transfer(connect('/tmp/socket'), sock)
+pw = Passageway()
+
+
+while True:
+    sock = socket.create_connection(('localhost', 8080))
+    sock.sendall('GET / HTTP/1.0\r\n\r\n')
+    pw.transfer(outbound, sock)
+    sock.close()

@@ -14,8 +14,7 @@ class PassagewayException(Exception):
     Raised when a Rail can't be sent across a PassageWay.
     '''
 
-
-EncodedObject = namedtuple('EncodedObject', 'encoded filenos')
+DescribedObject = namedtuple('DescribedObject', 'description filenos')
 
 
 def _ensure_only_fds(filenos, only=1):
@@ -33,11 +32,35 @@ class Basket(object):
         # bytestring!
         return self.__class__.__name__.encode('utf-8')
 
+    def describe(self, obj):
+        raise NotImplemented
+
+    def rescribe(self, decoded, filenos):
+        raise NotImplemented
+
     def encode(self, obj):
         raise NotImplemented
 
     def decode(self, encoded, filenos):
         raise NotImplemented
+
+
+class JSONBasketException(Exception):
+    pass
+
+
+class JSONBasket(Basket):
+
+    def encode(self, obj):
+        desc, filenos = self.describe(obj)
+        return json.dumps(desc), filenos
+
+    def decode(self, encoded, filenos):
+        try:
+            desc = json.loads(encoded)
+        except ValueError:
+            raise JSONBasketException("Could not deserialize object")
+        return self.rescribe(desc, filenos)
 
 
 class SocketBasketException(PassagewayException):
@@ -47,21 +70,19 @@ class SocketBasketException(PassagewayException):
     '''
 
 
-class SocketBasket(Basket):
+class SocketBasket(JSONBasket):
     type = socket.socket
 
-    def encode(self, sock):
+    def describe(self, sock):
         desc = {'family': sock.family, 'type': sock.type, 'proto': sock.proto}
-        return EncodedObject(encoded=json.dumps(desc), filenos=[sock.fileno()])
+        return DescribedObject(description=desc,
+                               filenos=[sock.fileno()])
 
-    def decode(self, encoded, filenos):
+    def rescribe(self, description, filenos):
         _ensure_only_fds(filenos, only=1)
         (fd,) = filenos
-        try:
-            desc = json.loads(encoded)
-        except ValueError:
-            raise SocketBasketException("Could not recover encoded socket")
 
+        desc = description
         try:
             family, type, proto = desc['family'], desc['type'], desc['proto']
         except KeyError as e:
@@ -217,11 +238,11 @@ class Passageway(object):
             raise PassagewayException("Don't have a basket for type"
                                       ' of %r' % obj)
 
-        encoded_obj = basket.encode(obj)
+        encoded, filenos = basket.encode(obj)
         self._send_netstring_pair(sock,
                                   identity=basket.identity,
-                                  encoded=encoded_obj.encoded,
-                                  filenos=encoded_obj.filenos)
+                                  encoded=encoded,
+                                  filenos=filenos)
 
     def obtain(self, sock, obj_type):
         with self.BASKET_LOCK:

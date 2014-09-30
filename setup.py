@@ -10,11 +10,11 @@ __description__ = 'Send file objects between Python processes on Linux'
 
 
 if __name__ == '__main__':
-    setup(name='sendfileobj',
+    setup(name='passage',
           version=__version__,
           description=__description__,
           author=__author__,
           author_email=__author_email__,
-          py_modules=['socket_messages'],
+          package=['passage'],
           license=__license__,
           platforms='linux') # ??

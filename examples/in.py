@@ -1,13 +1,13 @@
 import socket
 from passage.way import Passageway
-from passage.connections import bind
+from passage.connections import connect
 
-listener = bind('/tmp/socket')
+outbound = connect('/tmp/socket')
+
 pw = Passageway()
-inbound, _ = listener.accept()
 
 
 while True:
-    sock = pw.obtain(inbound, socket.socket)
+    sock = pw.obtain(outbound, socket.socket)
     print sock, len(sock.recv(1024))
     sock.close()

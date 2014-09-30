@@ -57,7 +57,7 @@ def CMSG_SPACE(length):
     length_align = CMSG_ALIGN(length).value
     sizeof_cmsghdr = ctypes.sizeof(cmsghdr)
     cmsghdr_align = CMSG_ALIGN(sizeof_cmsghdr).value
-    return ctypes.c_size_t(length_align + cmsghdr_align)
+    return ctypes.c_size_t(length_align + cmsghdr_align).value
 
 
 def CMSG_LEN(length):
@@ -145,7 +145,7 @@ def unpack_cmsghdrs(msg_control, msg_controllen):
         cmsg_headers.append(ControlMessageHeader(cmsg_level,
                                                  cmsg_type,
                                                  cmsg_data))
-        offset += CMSG_SPACE(cmsg_header.cmsg_len - header_length).value
+        offset += CMSG_SPACE(cmsg_header.cmsg_len - header_length)
     return cmsg_headers
 
 

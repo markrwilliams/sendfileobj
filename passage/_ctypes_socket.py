@@ -82,7 +82,7 @@ _recvmsg.restype = ctypes.c_int
 class CMSGError(socket.error):
 
     def __init__(self, errno, msg):
-        name = errorcode[11]
+        name = errorcode[errno]
         msg = '(%s) %s: %s' % (name, msg, os.strerror(errno))
         super(CMSGError, self).__init__(errno, msg)
 

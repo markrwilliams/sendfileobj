@@ -88,9 +88,9 @@ class SocketBasket(JSONBasket):
         except KeyError as e:
             raise SocketBasketException('Missing socket data %r' % e.args[0])
 
-        sock = socket.fromfd(fd, family, type, proto)
         # https://docs.python.org/2/library/socket.html#socket.fromfd
         # Duplicate the file descriptor fd, so close it
+        sock = socket.fromfd(fd, family, type, proto)
         os.close(fd)
 
         return sock
@@ -254,6 +254,6 @@ class Passageway(object):
 
         identity, filenos = self._recv_netstring(sock, receive_fds=True)
         if basket.identity != identity:
-            raise PassagewayException('Unknown identity %s' % identity)
+            raise PassagewayException('Unexpected identity %s' % identity)
         encoded, _ = self._recv_netstring(sock)
         return basket.decode(str(encoded), filenos)

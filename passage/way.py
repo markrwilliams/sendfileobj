@@ -123,7 +123,6 @@ class Passageway(object):
         self.baskets = []
         self._identities = {}
         self._types = {}
-        self._buf = bytearray()
 
         if defaults:
             self.register_baskets([basket()
@@ -179,17 +178,18 @@ class Passageway(object):
     def _recv_netstring(self, sock, receive_fds=True):
         # TODO: transport and protocol -- especially: what happens if
         # sock is SOCK_STREAM and the connection is closed mid-read?
-        buf = self._buf
         fds = array('i')
         ancbufsize = 0
         if receive_fds:
             ancbufsize = CMSG_SPACE(self.maxfds * fds.itemsize)
 
         # retrieve length
-        m = self._LENGTH_RE.match(buf)
+        m = None
+        length_buf = bytearray()
         while m is None:
-            new_buf = bytearray(self.MAX_DIGITS - len(buf))
-            recvd = recvmsg_into(sock, [new_buf], ancbufsize=ancbufsize)
+            new_buf = bytearray(self.MAX_DIGITS - len(length_buf))
+            recvd = recvmsg_into(sock, [new_buf], ancbufsize=ancbufsize,
+                                 flags=socket.MSG_PEEK)
             nbytes, ancdata, msg_flag, address = recvd
 
             for cmsg_level, cmsg_type, cmsg_data in ancdata:
@@ -203,31 +203,34 @@ class Passageway(object):
             if not nbytes:
                 raise DisconnectedPassageway
 
-            buf += new_buf[:nbytes]
+            length_buf += new_buf[:nbytes]
 
-            m = self._LENGTH_RE.match(buf)
-            if not m and len(buf) >= self.MAX_DIGITS:
+            m = self._LENGTH_RE.match(length_buf)
+            if not m and len(length_buf) >= self.MAX_DIGITS:
                 raise PassagewayException('Could not read length of'
                                           ' bucket message')
 
-        length = int(m.group('length'))
-        buf = buf[m.end():]
+        consumed_length = sock.recv(m.end())
+        assert consumed_length == m.group()
+        length = int(m.group('length')) + 1  # including ,
 
-        while len(buf) < length:
-            new_buf = bytearray(self.MAX_DIGITS - len(buf))
+        data_buf = bytearray()
+        while len(data_buf) < length:
+            new_buf = bytearray(length - len(data_buf))
             recvd = recvmsg_into(sock, [new_buf], ancbufsize=0)
             nbytes, ancdata, msg_flag, address = recvd
 
             if not nbytes:
                 raise DisconnectedPassageway
 
-            buf += new_buf[:nbytes]
+            data_buf += new_buf[:nbytes]
 
-        self._buf, comma, buf = buf[length + 1:], buf[length], buf[:length]
+        comma = data_buf.pop()
+
         if not comma == ord(','):
-            raise PassagewayException('Unexpected terminating char')
+            raise PassagewayException('Unexpected terminating char %r' % comma)
 
-        return buf, list(fds)
+        return data_buf, list(fds)
 
     def transfer(self, sock, obj):
         # TODO: do we honor inheritance?

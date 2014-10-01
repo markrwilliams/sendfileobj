@@ -214,24 +214,24 @@ class Passageway(object):
         assert consumed_length == m.group()
         length = int(m.group('length')) + 1  # including ,
 
-        data_buf = bytearray()
-        while len(data_buf) < length:
-            new_buf = bytearray(length - len(data_buf))
-            recvd = recvmsg_into(sock, [new_buf], ancbufsize=0)
-            nbytes, ancdata, msg_flag, address = recvd
+        data_read = 0
+        data_chunks = []
+        while data_read < length:
+            chunk = sock.recv(length - data_read)
+            data_read += len(chunk)
 
-            if not nbytes:
+            if not chunk:
                 raise DisconnectedPassageway
 
-            data_buf += new_buf[:nbytes]
+            data_chunks.append(chunk)
 
-        comma = data_buf.pop()
+        data = ''.join(data_chunks)
 
-        if not comma == ord(','):
+        if not data[-1] == ',':
             raise PassagewayException('Unexpected terminating char '
-                                      '%r' % chr(comma))
+                                      '%r' % data[-1])
 
-        return data_buf, list(fds)
+        return data[:-1], list(fds)
 
     def transfer(self, sock, obj):
         # TODO: do we honor inheritance?

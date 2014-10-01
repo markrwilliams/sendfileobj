@@ -24,7 +24,7 @@ def _ensure_only_fds(filenos, only=1):
                                       % (len(filenos), only))
 
 
-class Basket(object):
+class Message(object):
     type = None
 
     @property
@@ -45,11 +45,11 @@ class Basket(object):
         raise NotImplemented
 
 
-class JSONBasketException(Exception):
+class JSONMessageException(Exception):
     pass
 
 
-class JSONBasket(Basket):
+class JSONMessage(Message):
 
     def encode(self, obj):
         desc, filenos = self.describe(obj)
@@ -59,18 +59,18 @@ class JSONBasket(Basket):
         try:
             desc = json.loads(encoded)
         except ValueError:
-            raise JSONBasketException("Could not deserialize object")
+            raise JSONMessageException("Could not deserialize object")
         return self.rescribe(desc, filenos)
 
 
-class SocketBasketException(PassagewayException):
+class SocketMessageException(PassagewayException):
     '''\
-    Raised when a SocketBasket can't process a sent or received
+    Raised when a SocketMessage can't process a sent or received
     socket
     '''
 
 
-class SocketBasket(JSONBasket):
+class SocketMessage(JSONMessage):
     type = socket.socket
 
     def describe(self, sock):
@@ -86,7 +86,7 @@ class SocketBasket(JSONBasket):
         try:
             family, type, proto = desc['family'], desc['type'], desc['proto']
         except KeyError as e:
-            raise SocketBasketException('Missing socket data %r' % e.args[0])
+            raise SocketMessageException('Missing socket data %r' % e.args[0])
 
         # https://docs.python.org/2/library/socket.html#socket.fromfd
         # Duplicate the file descriptor fd, so close it
@@ -96,10 +96,10 @@ class SocketBasket(JSONBasket):
         return sock
 
 
-class OverlappingBasketException(PassagewayException):
+class OverlappingMessageException(PassagewayException):
     '''\
-    Raised when Baskets overlap by either type or identity inside a
-    Basket
+    Raised when Messages overlap by either type or identity inside a
+    Message
     '''
 
 
@@ -109,52 +109,52 @@ class DisconnectedPassageway(PassagewayException):
 
 class Passageway(object):
     '''\
-    A way to send Baskets.
+    A way to send Messages.
 
-    defaults: when False, don't include the default baskets
+    defaults: when False, don't include the default messages
     '''
-    DEFAULT_BASKETS = (SocketBasket,)
-    BASKET_LOCK = Lock()
+    DEFAULT_MESSAGES = (SocketMessage,)
+    MESSAGE_LOCK = Lock()
     MAX_DIGITS = 1024
 
     _LENGTH_RE = re.compile('(?P<length>\d+):')
 
-    def __init__(self, baskets=(), defaults=True, maxfds=1024):
-        self.baskets = []
+    def __init__(self, messages=(), defaults=True, maxfds=1024):
+        self.messages = []
         self._identities = {}
         self._types = {}
 
         if defaults:
-            self.register_baskets([basket()
-                                   for basket in self.DEFAULT_BASKETS])
-        if baskets:
-            self.register_baskets(baskets)
+            self.register_messages([message()
+                                   for message in self.DEFAULT_MESSAGES])
+        if messages:
+            self.register_messages(messages)
 
         self.maxfds = maxfds
 
-    def register_baskets(self, baskets):
-        with self.BASKET_LOCK:
+    def register_messages(self, messages):
+        with self.MESSAGE_LOCK:
             new_types, new_ids = {}, {}
-            for basket in baskets:
-                new_types[basket.type] = basket
-                new_ids[basket.identity] = basket
+            for message in messages:
+                new_types[message.type] = message
+                new_ids[message.identity] = message
 
             overlapping_types = set(self._types).intersection(set(new_types))
             overlapping_ids = set(self._identities).intersection(set(new_ids))
 
             if overlapping_types or overlapping_ids:
-                def basket_names(baskets):
-                    return ', '.join(b.__class__.__name__ for b in baskets)
+                def message_names(messages):
+                    return ', '.join(b.__class__.__name__ for b in messages)
 
                 msg = ''
                 if overlapping_types:
                     msg += ('Overlapped existing by type:'
-                            ' %s' % basket_names(overlapping_types))
+                            ' %s' % message_names(overlapping_types))
                 if overlapping_ids:
                     msg += ('Overlapping existing by identity:'
-                            ' %s' % basket_names(overlapping_ids))
+                            ' %s' % message_names(overlapping_ids))
 
-                raise OverlappingBasketException(msg)
+                raise OverlappingMessageException(msg)
 
             self._types.update(new_types)
             self._identities.update(new_ids)
@@ -235,29 +235,29 @@ class Passageway(object):
 
     def transfer(self, sock, obj):
         # TODO: do we honor inheritance?
-        with self.BASKET_LOCK:
-            basket = self._types.get(type(obj))
+        with self.MESSAGE_LOCK:
+            message = self._types.get(type(obj))
 
-        if basket is None:
-            raise PassagewayException("Don't have a basket for type"
+        if message is None:
+            raise PassagewayException("Don't have a message for type"
                                       ' of %r' % obj)
 
-        encoded, filenos = basket.encode(obj)
+        encoded, filenos = message.encode(obj)
         self._send_netstring_pair(sock,
-                                  identity=basket.identity,
+                                  identity=message.identity,
                                   encoded=encoded,
                                   filenos=filenos)
 
     def obtain(self, sock, obj_type):
-        with self.BASKET_LOCK:
-            basket = self._types.get(obj_type)
+        with self.MESSAGE_LOCK:
+            message = self._types.get(obj_type)
 
-        if basket is None:
+        if message is None:
             raise PassagewayException("Can't obtain "
                                       'object of type %r' % obj_type)
 
         identity, filenos = self._recv_netstring(sock, receive_fds=True)
-        if basket.identity != identity:
+        if message.identity != identity:
             raise PassagewayException('Unexpected identity %s' % identity)
         encoded, _ = self._recv_netstring(sock)
-        return basket.decode(str(encoded), filenos)
+        return message.decode(str(encoded), filenos)

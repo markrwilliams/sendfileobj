@@ -228,7 +228,8 @@ class Passageway(object):
         comma = data_buf.pop()
 
         if not comma == ord(','):
-            raise PassagewayException('Unexpected terminating char %r' % comma)
+            raise PassagewayException('Unexpected terminating char '
+                                      '%r' % chr(comma))
 
         return data_buf, list(fds)
 

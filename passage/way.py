@@ -1,7 +1,7 @@
 from collections import namedtuple
 import os
 import json
-import socket
+import socket, _socket
 from threading import Lock
 from array import array
 import re
@@ -71,7 +71,7 @@ class SocketMessageException(PassagewayException):
 
 
 class SocketMessage(JSONMessage):
-    type = socket.socket
+    type = (socket.socket, _socket.socket)
 
     def describe(self, sock):
         desc = {'family': sock.family, 'type': sock.type, 'proto': sock.proto}
@@ -136,7 +136,11 @@ class Passageway(object):
         with self.MESSAGE_LOCK:
             new_types, new_ids = {}, {}
             for message in messages:
-                new_types[message.type] = message
+                if isinstance(message.type, (tuple, list)):
+                    for t in message.type:
+                        new_types[t] = message
+                else:
+                    new_types[message.type] = message
                 new_ids[message.identity] = message
 
             overlapping_types = set(self._types).intersection(set(new_types))
@@ -217,6 +221,7 @@ class Passageway(object):
         data_read = 0
         data_chunks = []
         while data_read < length:
+            # TODO: tcp specific!
             chunk = sock.recv(length - data_read)
             data_read += len(chunk)
 

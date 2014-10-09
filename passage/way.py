@@ -114,7 +114,7 @@ class Passageway(object):
     defaults: when False, don't include the default messages
     '''
     DEFAULT_MESSAGES = (SocketMessage,)
-    MESSAGE_LOCK = Lock()
+    LOCK = Lock()
     MAX_DIGITS = 1024
 
     _LENGTH_RE = re.compile('(?P<length>\d+):')
@@ -133,7 +133,7 @@ class Passageway(object):
         self.maxfds = maxfds
 
     def register_messages(self, messages):
-        with self.MESSAGE_LOCK:
+        with self.LOCK:
             new_types, new_ids = {}, {}
             for message in messages:
                 if isinstance(message.type, (tuple, list)):
@@ -240,29 +240,29 @@ class Passageway(object):
 
     def transfer(self, sock, obj):
         # TODO: do we honor inheritance?
-        with self.MESSAGE_LOCK:
+        with self.LOCK:
             message = self._types.get(type(obj))
 
-        if message is None:
-            raise PassagewayException("Don't have a message for type"
-                                      ' of %r' % obj)
+            if message is None:
+                raise PassagewayException("Don't have a message for type"
+                                          ' of %r' % obj)
 
-        encoded, filenos = message.encode(obj)
-        self._send_netstring_pair(sock,
-                                  identity=message.identity,
-                                  encoded=encoded,
-                                  filenos=filenos)
+            encoded, filenos = message.encode(obj)
+            self._send_netstring_pair(sock,
+                                      identity=message.identity,
+                                      encoded=encoded,
+                                      filenos=filenos)
 
     def obtain(self, sock, obj_type):
-        with self.MESSAGE_LOCK:
+        with self.LOCK:
             message = self._types.get(obj_type)
 
-        if message is None:
-            raise PassagewayException("Can't obtain "
-                                      'object of type %r' % obj_type)
+            if message is None:
+                raise PassagewayException("Can't obtain "
+                                          'object of type %r' % obj_type)
 
-        identity, filenos = self._recv_netstring(sock, receive_fds=True)
-        if message.identity != identity:
-            raise PassagewayException('Unexpected identity %s' % identity)
-        encoded, _ = self._recv_netstring(sock)
-        return message.decode(str(encoded), filenos)
+            identity, filenos = self._recv_netstring(sock, receive_fds=True)
+            if message.identity != identity:
+                raise PassagewayException('Unexpected identity %s' % identity)
+            encoded, _ = self._recv_netstring(sock)
+            return message.decode(str(encoded), filenos)
